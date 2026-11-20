@@ -162,6 +162,8 @@ pnpm dev:browser
 
 Or use `docker compose --env-file .env -f infra/compose.yaml up --build -d`. The same token must reach the API and worker. Sessions have persistent Chromium profiles; the app can open a live screenshot console and import PDF downloads. Agent tools can read public pages and hand interactive work to the person. [Worker setup and boundaries](apps/worker/README.md).
 
+To run the image published with a GitHub release instead of building, use [`infra/compose.ghcr.yaml`](infra/compose.ghcr.yaml): `OPENFUSE_VERSION=0.1.0 docker compose --env-file .env -f infra/compose.ghcr.yaml up -d`. Releases are documented in [CONTRIBUTING.md](CONTRIBUTING.md#releases).
+
 ## Persistence and operation
 
 ### Linux terminal and workspace

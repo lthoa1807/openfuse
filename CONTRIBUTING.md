@@ -47,7 +47,7 @@ Both browser suites use controlled HTTP fixtures through the real worker and pro
 
 ## Releases
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: it repeats the CI checks, pushes the browser-worker and computer images to GitHub Container Registry (`ghcr.io/<owner>/openfuse-browser-worker`, `ghcr.io/<owner>/openfuse-computer`, tagged with the version, `latest` and the commit), and creates a GitHub release with the compiled server, the static web build and checksums. Nothing is published if any check fails.
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it repeats the CI checks, pushes the API server, browser-worker and computer images to GitHub Container Registry (`ghcr.io/<owner>/openfuse-server`, `openfuse-browser-worker`, `openfuse-computer`, tagged with the version, `latest` and the commit), and creates a GitHub release with the compiled server, the static web build and checksums. Nothing is published if any check fails. `infra/compose.stack.yaml` runs the whole stack from those images.
 
 ```sh
 git tag v0.2.0

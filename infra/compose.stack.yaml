@@ -1,0 +1,70 @@
+# Full stack from the images published with a GitHub release. Nothing is built
+# here: every service pulls from GHCR, so this file works from any directory
+# that has the `.env` below and an authenticated registry.
+#
+#   echo "$(gh auth token)" | docker login ghcr.io -u <owner> --password-stdin
+#   OPENFUSE_VERSION=0.1.1 docker compose up -d
+#
+# The API container mounts the host Docker socket because the computer feature
+# starts sibling containers with the docker CLI. Drop those two lines to run the
+# stack without a computer (also unset COMPUTER_ENABLED in .env).
+name: openfuse
+services:
+  api:
+    image: ghcr.io/${OPENFUSE_IMAGE_OWNER:-lthoa1807}/openfuse-server:${OPENFUSE_VERSION:-latest}
+    pull_policy: always
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      DATA_DIR: /data/openfuse
+      BROWSER_WORKER_URL: http://browser-worker:8790
+      COMPUTER_IMAGE: ghcr.io/${OPENFUSE_IMAGE_OWNER:-lthoa1807}/openfuse-computer:${OPENFUSE_VERSION:-latest}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - openfuse-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      browser-worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  browser-worker:
+    image: ghcr.io/${OPENFUSE_IMAGE_OWNER:-lthoa1807}/openfuse-browser-worker:${OPENFUSE_VERSION:-latest}
+    pull_policy: always
+    init: true
+    restart: unless-stopped
+    environment:
+      WORKER_HOST: 0.0.0.0
+      WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN to a random secret of at least 32 characters}
+    ports:
+      - "127.0.0.1:8790:8790"
+    volumes:
+      - browser-profiles:/data
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    shm_size: 256mb
+    mem_limit: 2g
+    pids_limit: 256
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  openfuse-data:
+  browser-profiles:

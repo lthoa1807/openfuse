@@ -1,0 +1,20 @@
+# Build context for the API server image (see apps/server/Dockerfile).
+.git
+.github
+docs
+tests
+assets
+node_modules
+**/node_modules
+dist
+**/dist
+.expo
+apps/mobile/ios
+apps/mobile/android
+.openfuse
+.openmuse
+artifacts
+*.tsbuildinfo
+.env
+.env.*
+!/.env.example

@@ -56,15 +56,13 @@ jobs:
       - run: pnpm test
       - run: pnpm build:server
 
-  # Browser worker and computer images. The API server itself deploys from the
-  # repository (see render.yaml), so only the images that already have a
-  # Dockerfile are published.
+  # API server, browser worker and computer images.
   images:
     name: Publish ${{ matrix.image }}
     needs: verify
     if: github.event_name == 'push' || inputs.images
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -72,10 +70,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - image: server
+            context: .
+            file: apps/server/Dockerfile
           - image: browser-worker
             context: apps/worker
+            file: apps/worker/Dockerfile
           - image: computer
             context: apps/computer
+            file: apps/computer/Dockerfile
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -104,6 +107,7 @@ jobs:
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           # Add arm64 here if Playwright publishes arm64 for the pinned base
           # image; it doubles build time.
           platforms: linux/amd64
@@ -143,7 +147,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           mkdir -p release
           tar --create --gzip --file "release/openfuse-server-$version.tar.gz" \
-            dist package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc \
+            dist package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc patches \
             apps/mobile/package.json apps/worker/package.json
           tar --create --gzip --file "release/openfuse-web-$version.tar.gz" \
             -C apps/mobile/dist/web .
