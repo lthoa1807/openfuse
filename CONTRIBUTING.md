@@ -45,6 +45,17 @@ Both browser suites use controlled HTTP fixtures through the real worker and pro
 - Check iOS/Android layout when changing shared React Native components. Platform exports validate bundles; they do not prove a native binary works.
 - Document required credentials and unsupported capabilities when adding a connector.
 
+## Releases
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it repeats the CI checks, pushes the browser-worker and computer images to GitHub Container Registry (`ghcr.io/<owner>/openfuse-browser-worker`, `ghcr.io/<owner>/openfuse-computer`, tagged with the version, `latest` and the commit), and creates a GitHub release with the compiled server, the static web build and checksums. Nothing is published if any check fails.
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Running the Release workflow by hand from a branch publishes the images as `edge` only; pass a tag in the `tag` input to also create the release.
+
 ## Pull requests and issues
 
 Open an issue for substantial architecture or connector changes so contributors can agree on scope. Small fixes can go directly to a pull request.

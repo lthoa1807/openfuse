@@ -1,0 +1,165 @@
+# Builds and publishes a release.
+#
+# Publish everything by pushing a tag:
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Actions -> Release -> Run workflow does the same from a branch and publishes
+# container images only, unless you pass a tag; then it also creates the GitHub
+# release with that tag.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, such as v0.2.0. Leave empty to build without a GitHub release."
+        required: false
+        type: string
+      images:
+        description: "Publish container images to GitHub Container Registry"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  REGISTRY: ghcr.io
+
+jobs:
+  # Nothing is published unless lint, types, tests and the server build pass on
+  # the exact commit being released.
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm --dir apps/worker typecheck
+      - run: pnpm test
+      - run: pnpm build:server
+
+  # Browser worker and computer images. The API server itself deploys from the
+  # repository (see render.yaml), so only the images that already have a
+  # Dockerfile are published.
+  images:
+    name: Publish ${{ matrix.image }}
+    needs: verify
+    if: github.event_name == 'push' || inputs.images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: browser-worker
+            context: apps/worker
+          - image: computer
+            context: apps/computer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Lowercase the owner for the registry path
+        run: echo "IMAGE_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/openfuse-${{ matrix.image }}
+          labels: |
+            org.opencontainers.image.title=openfuse-${{ matrix.image }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=sha,format=long
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          # Add arm64 here if Playwright publishes arm64 for the pinned base
+          # image; it doubles build time.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # GitHub release with the compiled server and the static web build.
+  release:
+    name: Publish release assets
+    needs: verify
+    if: github.event_name == 'push' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:server
+      - name: Export the web app
+        run: pnpm --dir apps/mobile exec expo export --platform web --output-dir dist/web --clear
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p release
+          tar --create --gzip --file "release/openfuse-server-$version.tar.gz" \
+            dist package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc \
+            apps/mobile/package.json apps/worker/package.json
+          tar --create --gzip --file "release/openfuse-web-$version.tar.gz" \
+            -C apps/mobile/dist/web .
+          ( cd release && sha256sum -- *.tar.gz > SHA256SUMS )
+          ls -l release
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="$(mktemp)"
+          sed "s|@OWNER@|${GITHUB_REPOSITORY_OWNER,,}|g" .github/release-notes.md > "$notes"
+          args=(--title "$RELEASE_TAG" --notes-file "$notes" --generate-notes)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            args+=(--verify-tag)
+          else
+            args+=(--target "$GITHUB_SHA")
+          fi
+          gh release create "$RELEASE_TAG" release/* "${args[@]}"
